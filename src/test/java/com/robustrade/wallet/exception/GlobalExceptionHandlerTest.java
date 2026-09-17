@@ -104,4 +104,28 @@ class GlobalExceptionHandlerTest {
     assertThat(response.getBody().error()).isEqualTo("INTERNAL_ERROR");
     assertThat(response.getBody().message()).doesNotContain("boom");
   }
+
+  /** A field can break two rules at once; the client needs both messages, not just the last. */
+  @Test
+  void multipleViolationsOnOneFieldAreAllReported() {
+    BindingResult bindingResult = mock(BindingResult.class);
+    when(bindingResult.getFieldErrors())
+        .thenReturn(
+            List.of(
+                new FieldError("createTransferRequest", "idempotencyKey", "must not be blank"),
+                new FieldError(
+                    "createTransferRequest", "idempotencyKey", "size must be at most 255")));
+    MethodArgumentNotValidException exception = mock(MethodArgumentNotValidException.class);
+    when(exception.getBindingResult()).thenReturn(bindingResult);
+
+    ResponseEntity<Object> response =
+        handler.handleMethodArgumentNotValid(
+            exception, new HttpHeaders(), HttpStatus.BAD_REQUEST, null);
+
+    ErrorResponse body = (ErrorResponse) response.getBody();
+    assertThat(body).isNotNull();
+    assertThat(body.details().get("idempotencyKey"))
+        .contains("must not be blank")
+        .contains("size must be at most 255");
+  }
 }

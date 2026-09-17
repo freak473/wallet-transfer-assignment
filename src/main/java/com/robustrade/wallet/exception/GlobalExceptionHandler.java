@@ -35,7 +35,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     Map<String, String> details = new HashMap<>();
     e.getBindingResult()
         .getFieldErrors()
-        .forEach(error -> details.put(error.getField(), error.getDefaultMessage()));
+        .forEach(
+            error ->
+                details.merge(
+                    error.getField(),
+                    error.getDefaultMessage(),
+                    (first, next) -> first + "; " + next));
     log.info("Request rejected as invalid: {}", details);
     return ResponseEntity.badRequest()
         .body(new ErrorResponse("VALIDATION_FAILED", "Request is invalid", details));
