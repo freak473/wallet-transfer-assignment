@@ -45,40 +45,49 @@ call returned. Same status code, same body, plus a header Idempotent-Replayed: t
 Flow:
 
 The whole transfer is one @Transactional method, TransferService.createTransfer().
-Steps 2 to 6 run inside that one DB transaction.
+Steps 2 to 7 run inside that one DB transaction.
 
 1. Validate the request in the controller. If invalid -> 400 with appropriate error messages, nothing is saved.
 
 
 2. Transaction starts.
 
-3. Lock both wallet rows, always the smaller wallet id first (sort the two ids in Java):
+3. Look the idempotency key up first. If a transfer already exists for it, check it matches the
+   request and return it as a replay; otherwise 409. This costs one indexed read and means a
+   retry of an already completed transfer never takes wallet locks, so it cannot queue behind an
+   unrelated transfer on those wallets or time out waiting for one.
+   A duplicate arriving while the first request is still open will not see it here, because that
+   row stays invisible until it commits. It falls through to step 5, where the unique index
+   serialises the two.
+
+
+4. Lock both wallet rows, always the smaller wallet id first (sort the two ids in Java):
      walletRepository.findByIdForUpdate(firstId)
      walletRepository.findByIdForUpdate(secondId)
    Both are @Lock(LockModeType.PESSIMISTIC_WRITE) queries, which Hibernate turns into
-   SELECT ... FOR UPDATE on Postgres.
+   SELECT ... FOR NO KEY UPDATE on Postgres.
    If either wallet is missing -> WalletNotFoundException -> rollback, 404 with appropriate error message.
 
 
-4. Insert the transfer as PENDING using a native query:
+5. Insert the transfer as PENDING using a native query:
      INSERT INTO transfers (...) VALUES (...)
      ON CONFLICT (idempotency_key) DO NOTHING
    It returns 1 if the row got inserted and 0 if the key already exists. If 0 -> read the
    saved transfer by key and return it. Nothing else gets written.
 
 
-5. If either wallet is not ACTIVE -> transfer.markFailed(WALLET_NOT_ACTIVE)
+6. If either wallet is not ACTIVE -> transfer.markFailed(WALLET_NOT_ACTIVE)
    If the from wallet doesn't have enough balance -> transfer.markFailed(INSUFFICIENT_FUNDS)
    - return a result with status FAILED (no exception). The transaction commits and the
      API returns 422
 
-6. Otherwise:
+7. Otherwise:
    - fromWallet.debit(amount), toWallet.credit(amount)
    - save 2 ledger entries: DEBIT on the from wallet, CREDIT on the to wallet
    - transfer.markProcessed()
    - the transaction commits, the controller returns 201
 
-7. Any unexpected exception -> Spring rolls back, 500.
+8. Any unexpected exception -> Spring rolls back, 500.
 
 Insufficient funds is a commit, not a rollback:
 We want the FAILED transfer saved against the key, so a retry later still gets FAILED. If we

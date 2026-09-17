@@ -47,6 +47,15 @@ public class TransferService {
         toId,
         request.amount());
 
+    // A committed replay needs no wallet locks at all. A concurrent duplicate misses this
+    // lookup (the other transaction's row is invisible until it commits) and falls through to
+    // the ON CONFLICT insert below, where the unique index serialises the two.
+    Optional<Transfer> alreadyApplied =
+        transferRepository.findByIdempotencyKey(request.idempotencyKey());
+    if (alreadyApplied.isPresent()) {
+      return replayOf(alreadyApplied.get(), request);
+    }
+
     LockedWallets wallets = lockInDeadlockSafeOrder(fromId, toId);
     Wallet fromWallet = wallets.from();
     Wallet toWallet = wallets.to();

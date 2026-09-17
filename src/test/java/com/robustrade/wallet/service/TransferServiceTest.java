@@ -94,28 +94,45 @@ class TransferServiceTest {
   }
 
   @Test
-  void reusedKeyWithAnIdenticalRequestReplaysWithoutMovingMoney() {
-    Wallet from = Wallets.active("wallet_1", "1000");
-    Wallet to = Wallets.active("wallet_2", "500");
+  void reusedKeyWithAnIdenticalRequestReplaysWithoutTouchingWallets() {
     Transfer stored = pendingTransfer("wallet_1", "wallet_2", "100");
     stored.markProcessed();
-    givenLocked(from, to);
-    givenInsertConflicts(stored);
+    givenAlreadyApplied(stored);
 
     TransferResult result = transfer("wallet_1", "wallet_2", "100");
 
     assertThat(result.replayed()).isTrue();
     assertThat(result.transfer()).isSameAs(stored);
-    assertThat(from.getBalance()).isEqualByComparingTo("1000");
-    assertThat(to.getBalance()).isEqualByComparingTo("500");
+    verify(walletRepository, never()).findByIdForUpdate(any());
+    verify(transferRepository, never()).insertIfAbsent(any(), any(), any(), any(), any(), any());
+    verify(ledgerEntryRepository, never()).save(any());
+  }
+
+  /**
+   * A duplicate arriving while the first request is still open misses the pre-check, because the
+   * other transaction's row is invisible until it commits. ON CONFLICT DO NOTHING blocks on the
+   * unique index, and the read-back behind it is what makes the replay safe.
+   */
+  @Test
+  void aConcurrentDuplicateReplaysThroughTheInsertPath() {
+    Transfer stored = pendingTransfer("wallet_1", "wallet_2", "100");
+    stored.markProcessed();
+    givenLocked(Wallets.active("wallet_1", "1000"), Wallets.active("wallet_2", "500"));
+    when(transferRepository.findByIdempotencyKey(KEY))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(stored));
+    when(transferRepository.insertIfAbsent(any(), any(), any(), any(), any(), any())).thenReturn(0);
+
+    TransferResult result = transfer("wallet_1", "wallet_2", "100");
+
+    assertThat(result.replayed()).isTrue();
     verify(ledgerEntryRepository, never()).save(any());
   }
 
   /** The stored amount reads back with NUMERIC scale, which must not defeat the replay check. */
   @Test
   void replayToleratesScaleDifferencesInTheAmount() {
-    givenLocked(Wallets.active("wallet_1", "1000"), Wallets.active("wallet_2", "500"));
-    givenInsertConflicts(pendingTransfer("wallet_1", "wallet_2", "100.0000"));
+    givenAlreadyApplied(pendingTransfer("wallet_1", "wallet_2", "100.0000"));
 
     TransferResult result = transfer("wallet_1", "wallet_2", "100");
 
@@ -124,8 +141,7 @@ class TransferServiceTest {
 
   @Test
   void reusedKeyWithADifferentRequestIsAConflict() {
-    givenLocked(Wallets.active("wallet_1", "1000"), Wallets.active("wallet_2", "500"));
-    givenInsertConflicts(pendingTransfer("wallet_1", "wallet_2", "100"));
+    givenAlreadyApplied(pendingTransfer("wallet_1", "wallet_2", "100"));
 
     assertThatThrownBy(() -> transfer("wallet_1", "wallet_2", "999"))
         .isInstanceOf(IdempotencyConflictException.class)
@@ -212,11 +228,12 @@ class TransferServiceTest {
 
   private void givenInsertSucceeds(Transfer stored) {
     when(transferRepository.insertIfAbsent(any(), any(), any(), any(), any(), any())).thenReturn(1);
-    when(transferRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.of(stored));
+    when(transferRepository.findByIdempotencyKey(KEY))
+        .thenReturn(Optional.empty()) // the pre-check: nothing stored under this key yet
+        .thenReturn(Optional.of(stored)); // the read-back after the insert
   }
 
-  private void givenInsertConflicts(Transfer stored) {
-    when(transferRepository.insertIfAbsent(any(), any(), any(), any(), any(), any())).thenReturn(0);
+  private void givenAlreadyApplied(Transfer stored) {
     when(transferRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.of(stored));
   }
 
