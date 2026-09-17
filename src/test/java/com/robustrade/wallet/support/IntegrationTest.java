@@ -52,8 +52,12 @@ public abstract class IntegrationTest {
         "SELECT balance FROM wallets WHERE id = ?", BigDecimal.class, walletId);
   }
 
-  protected int countOf(String table) {
-    return jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class);
+  protected int transferCount() {
+    return jdbc.queryForObject("SELECT count(*) FROM transfers", Integer.class);
+  }
+
+  protected int ledgerEntryCount() {
+    return jdbc.queryForObject("SELECT count(*) FROM ledger_entries", Integer.class);
   }
 
   /** Debits are negative, credits positive. A balanced ledger always sums to zero. */

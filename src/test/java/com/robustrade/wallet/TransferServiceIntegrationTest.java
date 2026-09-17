@@ -49,7 +49,7 @@ class TransferServiceIntegrationTest extends IntegrationTest {
     assertThat(result.transfer().getStatus()).isEqualTo(TransferStatus.PROCESSED);
     assertThat(balanceOf("wallet_1")).isEqualByComparingTo("875");
     assertThat(balanceOf("wallet_2")).isEqualByComparingTo("625");
-    assertThat(countOf("ledger_entries")).isEqualTo(2);
+    assertThat(ledgerEntryCount()).isEqualTo(2);
     assertThat(ledgerNet()).isEqualByComparingTo("0");
   }
 
@@ -60,8 +60,8 @@ class TransferServiceIntegrationTest extends IntegrationTest {
 
     assertThat(result.transfer().getStatus()).isEqualTo(TransferStatus.FAILED);
     assertThat(result.transfer().getFailureReason()).isEqualTo(FailureReason.INSUFFICIENT_FUNDS);
-    assertThat(countOf("transfers")).isEqualTo(1);
-    assertThat(countOf("ledger_entries")).isZero();
+    assertThat(transferCount()).isEqualTo(1);
+    assertThat(ledgerEntryCount()).isZero();
     assertThat(balanceOf("wallet_1")).isEqualByComparingTo("1000");
   }
 
@@ -81,8 +81,8 @@ class TransferServiceIntegrationTest extends IntegrationTest {
     assertThatThrownBy(() -> transfer("live-rollback", "wallet_1", "wallet_2", "125"))
         .isInstanceOf(IllegalStateException.class);
 
-    assertThat(countOf("transfers")).isZero();
-    assertThat(countOf("ledger_entries")).isZero();
+    assertThat(transferCount()).isZero();
+    assertThat(ledgerEntryCount()).isZero();
     assertThat(balanceOf("wallet_1")).isEqualByComparingTo("1000");
     assertThat(balanceOf("wallet_2")).isEqualByComparingTo("500");
   }
@@ -98,8 +98,8 @@ class TransferServiceIntegrationTest extends IntegrationTest {
     assertThat(results).allSatisfy(r -> assertThat(r.replayed()).isFalse());
     assertThat(balanceOf("wallet_1")).isEqualByComparingTo("920");
     assertThat(balanceOf("wallet_2")).isEqualByComparingTo("580");
-    assertThat(countOf("transfers")).isEqualTo(8);
-    assertThat(countOf("ledger_entries")).isEqualTo(16);
+    assertThat(transferCount()).isEqualTo(8);
+    assertThat(ledgerEntryCount()).isEqualTo(16);
     assertThat(ledgerNet()).isEqualByComparingTo("0");
   }
 
@@ -112,8 +112,8 @@ class TransferServiceIntegrationTest extends IntegrationTest {
     assertThat(results).filteredOn(TransferResult::replayed).hasSize(7);
     assertThat(balanceOf("wallet_1")).isEqualByComparingTo("990");
     assertThat(balanceOf("wallet_2")).isEqualByComparingTo("510");
-    assertThat(countOf("transfers")).isEqualTo(1);
-    assertThat(countOf("ledger_entries")).isEqualTo(2);
+    assertThat(transferCount()).isEqualTo(1);
+    assertThat(ledgerEntryCount()).isEqualTo(2);
   }
 
   /** Fires every request from its own thread at once, so they genuinely contend for the locks. */
